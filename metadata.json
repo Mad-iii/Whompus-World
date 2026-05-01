@@ -1,0 +1,6 @@
+{
+  "name": "Hunt the Wumpus AI",
+  "description": "A classic Hunt the Wumpus game with an integrated AI solver using propositional logic, Bayesian probability, and expected utility decision-making.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

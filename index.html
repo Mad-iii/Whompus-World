@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KB Agent: Dynamic Pathfinding</title>
+    <style>
+        :root {
+            --bg: #09090b;
+            --card: #18181b;
+            --border: #27272a;
+            --accent: #f59e0b;
+            --text: #fafafa;
+            --muted: #a1a1aa;
+            --wumpus: #ef4444;
+            --pit: #3b82f6;
+            --safe: #22c55e;
+            --gold: #fde047;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            min-height: 100vh;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        #game-container {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            grid-template-rows: auto 1fr auto;
+            gap: 16px;
+            width: 100%;
+            max-width: 1200px;
+            min-height: 800px;
+        }
+
+        .grid-config {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            background: #27272a;
+            padding: 10px 16px;
+            border-radius: 12px;
+            margin-top: 8px;
+        }
+
+        .config-input {
+            width: 50px;
+            background: #18181b;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 4px;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+            margin-top: auto;
+        }
+
+        .metric-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 11px;
+        }
+
+        /* Color Coding */
+        .room.confirmed-danger { border-color: var(--wumpus); background: rgba(239, 68, 68, 0.1); }
+        .room.confirmed-safe { border-color: var(--safe); background: rgba(34, 197, 94, 0.1); }
+        .room.unknown { border-color: var(--border); background: #09090b; }
+
+        /* Bento Grid Sections */
+        .bento-cell {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .header-cell {
+            grid-column: 1 / span 2;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-cell h1 {
+            font-size: 24px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: var(--accent);
+        }
+
+        /* The Cave Grid */
+        .grid {
+            display: grid;
+            gap: 10px;
+            flex-grow: 1;
+            min-height: 400px;
+        }
+
+        .room {
+            background: #202023;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 10px;
+            color: var(--muted);
+            transition: all 0.2s ease;
+            cursor: pointer;
+            min-height: 60px;
+        }
+
+        .room.visited {
+            background: #27272a;
+            border-color: #3f3f46;
+        }
+
+        .room.fog {
+            background: #09090b;
+            border-style: dashed;
+        }
+
+        .room.current {
+            border-color: var(--accent);
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.3);
+        }
+
+        .room.path-highlight {
+            border-color: var(--gold);
+            background: rgba(253, 224, 71, 0.1);
+        }
+
+        .room-num {
+            position: absolute;
+            top: 6px;
+            left: 8px;
+            opacity: 0.5;
+            font-size: 9px;
+        }
+
+        .perceptions {
+            display: flex;
+            gap: 4px;
+            margin-top: 20px;
+        }
+
+        .perception-icon {
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .entity-icon {
+            font-size: 24px;
+            z-index: 2;
+        }
+
+        /* Sidebar Panel */
+        #sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow: hidden;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .stat-item {
+            background: #27272a;
+            padding: 12px;
+            border-radius: 12px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--muted);
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        button {
+            background: #27272a;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        button:hover:not(:disabled) {
+            background: #3f3f46;
+        }
+
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        button.primary {
+            background: var(--accent);
+            color: #000;
+            border: none;
+        }
+
+        .ai-btn {
+            background: #3b82f6;
+            border: none;
+            grid-column: span 3;
+            margin-top: 8px;
+        }
+
+        .ai-btn.active {
+            background: var(--wumpus);
+        }
+
+        .toggle-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        #log {
+            height: 120px;
+            overflow-y: auto;
+            font-size: 11px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            color: var(--muted);
+        }
+
+        .log-entry {
+            padding: 4px 8px;
+            border-left: 2px solid var(--accent);
+            background: rgba(255,255,255,0.02);
+        }
+
+        #explanation {
+            font-size: 12px;
+            line-height: 1.4;
+            color: var(--text);
+            height: 100%;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+
+        .reasoning-fact {
+            display: inline-block;
+            background: #0f172a;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin: 2px;
+            font-size: 10px;
+            color: var(--accent);
+            border: 1px solid var(--border);
+        }
+
+        /* Modal Overlay */
+        #modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-content {
+            background: var(--card);
+            padding: 2.5rem;
+            border-radius: 24px;
+            text-align: center;
+            max-width: 400px;
+            border: 1px solid var(--border);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+
+        .modal-title { font-size: 2rem; margin-bottom: 1rem; font-weight: 800; }
+        .modal-msg { margin-bottom: 2rem; color: var(--muted); }
+
+        .status-msg {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--safe);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+        }
+
+        .explainer-cell {
+            grid-column: 1 / span 2;
+            height: 200px;
+        }
+
+        .panel-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 12px;
+            font-weight: 700;
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+        }
+
+        .select-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .select-label {
+            font-size: 10px;
+            color: var(--muted);
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+
+        select {
+            background: #27272a;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .trail-dot {
+            width: 4px;
+            height: 4px;
+            background: var(--accent);
+            border-radius: 50%;
+            position: absolute;
+            bottom: 4px;
+            left: 4px;
+            opacity: 0.5;
+        }
+
+        .dir-controls {
+            grid-column: span 3;
+            display: grid;
+            grid-template-areas: 
+                ". up ."
+                "left down right";
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+        .btn-up { grid-area: up; }
+        .btn-down { grid-area: down; }
+        .btn-left { grid-area: left; }
+        .btn-right { grid-area: right; }
+
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <!-- Header -->
+    <div class="bento-cell header-cell">
+        <div>
+            <h1>KB AGENT: DYNAMIC PATHFINDING</h1>
+            <p style="font-size: 12px; color: var(--muted);">Propositional Logic & Resolution Refutation Inference Engine</p>
+            <div class="grid-config">
+                <span class="select-label">Dimensions:</span>
+                <input type="number" id="rows-input" class="config-input" value="4" min="3" max="8">
+                <span>×</span>
+                <input type="number" id="cols-input" class="config-input" value="4" min="3" max="8">
+                <button class="primary" style="padding: 4px 12px;" onclick="game.reinit()">Rebuild World</button>
+            </div>
+        </div>
+        <div class="status-msg" id="game-status">SYSTEM READY</div>
+    </div>
+
+    <!-- Cave Grid -->
+    <div id="cave-view" class="bento-cell">
+        <div class="panel-title">
+            <span>The Cave of Wumpus</span>
+        </div>
+        <div id="grid" class="grid">
+            <!-- Rooms generated by JS -->
+        </div>
+        <div class="toggle-group">
+            <div class="select-group">
+                <span class="select-label">Game Mode</span>
+                <select id="mode-select" onchange="game.changeMode(this.value)">
+                    <option value="manual">Option A: Manual Play</option>
+                    <option value="auto">Option B: Auto Solver</option>
+                </select>
+            </div>
+            <div id="algo-select-container" class="select-group" style="display: none;">
+                <span class="select-label">Inference Mode</span>
+                <select id="algo-select" onchange="game.changeAlgo(this.value)">
+                    <option value="resolution">Resolution Refutation (Strict)</option>
+                    <option value="expert">Expert Heuristic (Fast)</option>
+                </select>
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <span class="select-label">Inference Steps:</span>
+                        <span id="metric-steps" style="color: var(--accent); float: right;">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="select-label">Active Percepts:</span>
+                        <div id="metric-percepts" style="margin-top: 4px; font-size: 10px;">None</div>
+                    </div>
+                </div>
+                <button id="start-ai-btn" class="ai-btn" style="margin-top: 8px; background: var(--safe); color: #000;" onclick="game.toggleAiRunning()">START INFERENCE</button>
+            </div>
+            <button id="reset-btn" class="toggle-btn" onclick="location.reload()">Reset Session</button>
+        </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div id="sidebar" class="bento-cell">
+        <div class="panel-title">Status & Actions</div>
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-item">
+                <span class="stat-label">Position</span>
+                <span id="stat-room" class="stat-value">0,0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Arrows</span>
+                <span id="stat-arrows" class="stat-value">1</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Gold</span>
+                <span id="stat-gold" class="stat-value">No</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Score</span>
+                <span id="stat-score" class="stat-value">0</span>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="dir-controls">
+            <button class="btn-up" onclick="game.handleAction('move', 'N')">↑</button>
+            <button class="btn-left" onclick="game.handleAction('move', 'W')">←</button>
+            <button class="btn-down" onclick="game.handleAction('move', 'S')">↓</button>
+            <button class="btn-right" onclick="game.handleAction('move', 'E')">→</button>
+        </div>
+        <div class="controls">
+            <button onclick="game.handleAction('shoot', 'N')">Shoot N</button>
+            <button onclick="game.handleAction('shoot', 'S')">Shoot S</button>
+            <button onclick="game.handleAction('shoot', 'E')">Shoot E</button>
+            <button onclick="game.handleAction('shoot', 'W')">Shoot W</button>
+            <button class="primary" onclick="game.handleAction('pickup')">Pick Gold</button>
+            <button class="primary" onclick="game.handleAction('climb')">Climb Out</button>
+        </div>
+    </div>
+
+    <!-- AI Explanation & Log -->
+    <div class="bento-cell explainer-cell">
+        <div class="panel-title">AI Reasoning & Perception Log</div>
+        <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; height: 100%;">
+            <div id="explanation">Waiting for action...</div>
+            <div id="log"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal -->
+<div id="modal">
+    <div class="modal-content">
+        <div id="modal-title" class="modal-title">Game Over</div>
+        <div id="modal-msg" class="modal-msg">You were eaten by the Wumpus!</div>
+        <button class="primary" style="width: 100%" onclick="location.reload()">Play Again</button>
+    </div>
+</div>
+
+<script>
+/**
+ * Resolution Refutation Inference Engine & KB Agent
+ */
+
+// --- Constants & Utilities ---
+let ROWS = 4;
+let COLS = 4;
+
+const getIndex = (r, c) => r * COLS + c;
+const getCoords = (idx) => ({ r: Math.floor(idx / COLS), c: idx % COLS });
+
+const ADJACENT = (idx) => {
+    const { r, c } = getCoords(idx);
+    const neighbors = [];
+    if (r > 0) neighbors.push(getIndex(r - 1, c));
+    if (r < ROWS - 1) neighbors.push(getIndex(r + 1, c));
+    if (c > 0) neighbors.push(getIndex(r, c - 1));
+    if (c < COLS - 1) neighbors.push(getIndex(r, c + 1));
+    return neighbors;
+};
+
+// --- Logic Classes ---
+
+class Literal {
+    constructor(symbol, isNegative = false) {
+        this.symbol = symbol;
+        this.isNegative = isNegative;
+    }
+    negate() {
+        return new Literal(this.symbol, !this.isNegative);
+    }
+    toString() {
+        return (this.isNegative ? "~" : "") + this.symbol;
+    }
+    equals(other) {
+        return this.symbol === other.symbol && this.isNegative === other.isNegative;
+    }
+}
+
+class Clause {
+    constructor(literals = []) {
+        // Unique literals only
+        this.literals = [];
+        literals.forEach(lit => {
+            if (!this.literals.some(l => l.equals(lit))) {
+                this.literals.push(lit);
+            }
+        });
+    }
+    isEmpty() { return this.literals.length === 0; }
+    contains(literal) { return this.literals.some(l => l.equals(literal)); }
+    toString() {
+        if (this.isEmpty()) return "[]";
+        return "(" + this.literals.map(l => l.toString()).join(" v ") + ")";
+    }
+}
+
+class KB {
+    constructor() {
+        this.clauses = [];
+        this.inferenceSteps = 0;
+    }
+
+    tell(clause) {
+        if (!this.clauses.some(c => c.toString() === clause.toString())) {
+            this.clauses.push(clause);
+        }
+    }
+
+    // Resolution PL-Inference
+    ask(queryLiteral) {
+        let clauses = [...this.clauses];
+        // Query to be refuted: negate alpha
+        const negatedQuery = new Clause([queryLiteral.negate()]);
+        if (!clauses.some(c => c.toString() === negatedQuery.toString())) {
+            clauses.push(negatedQuery);
+        }
+
+        const newClauses = new Set();
+        let steps = 0;
+        const startTime = Date.now();
+        const MAX_STEPS = 500; // Limit for web safety
+        const MAX_TIME = 2000; // 2 seconds safety
+
+        while (true) {
+            const pairs = this.getPairs(clauses);
+            for (const [c1, c2] of pairs) {
+                steps++;
+                this.inferenceSteps++;
+                const resolvents = this.resolve(c1, c2);
+                
+                for (const res of resolvents) {
+                    if (res.isEmpty()) {
+                        console.log("Proved " + queryLiteral.toString() + " in " + steps + " steps");
+                        return true;
+                    }
+                    newClauses.add(res.toString());
+                }
+
+                if (steps > MAX_STEPS || (Date.now() - startTime > MAX_TIME)) {
+                    console.warn("Resolution reached complexity limit");
+                    return false;
+                }
+            }
+
+            let allNewFound = true;
+            for (const n of newClauses) {
+                if (!clauses.some(c => c.toString() === n)) {
+                    allNewFound = false;
+                    // Parse string back to Clause or store strings
+                    // For simplicity in this implementation, we re-parse or store strings
+                    const literals = n.replace("(", "").replace(")", "").split(" v ").map(s => {
+                        const isNeg = s.startsWith("~");
+                        const sym = isNeg ? s.substring(1) : s;
+                        return new Literal(sym, isNeg);
+                    });
+                    clauses.push(new Clause(literals));
+                }
+            }
+
+            if (allNewFound) return false;
+        }
+    }
+
+    getPairs(arr) {
+        const res = [];
+        for (let i = 0; i < arr.length; i++) {
+            for (let j = i + 1; j < arr.length; j++) {
+                res.push([arr[i], arr[j]]);
+            }
+        }
+        return res;
+    }
+
+    resolve(c1, c2) {
+        const resolvents = [];
+        for (const l1 of c1.literals) {
+            for (const l2 of c2.literals) {
+                if (l1.symbol === l2.symbol && l1.isNegative !== l2.isNegative) {
+                    // Resolve l1 and l2
+                    const newLits = [
+                        ...c1.literals.filter(l => !l.equals(l1)),
+                        ...c2.literals.filter(l => !l.equals(l2))
+                    ];
+                    
+                    // Fact checking: If P v ~P in clause, ignore (tautology)
+                    let isTautology = false;
+                    for (let i = 0; i < newLits.length; i++) {
+                        for (let j = i + 1; j < newLits.length; j++) {
+                            if (newLits[i].symbol === newLits[j].symbol && newLits[i].isNegative !== newLits[j].isNegative) {
+                                isTautology = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!isTautology) {
+                        resolvents.push(new Clause(newLits));
+                    }
+                }
+            }
+        }
+        return resolvents;
+    }
+}
+
+// --- Agent Logic ---
+
+const AIAgent = {
+    kb: new KB(),
+    knownSafe: new Set([0]),
+    knownPits: new Set(),
+    knownWumpus: new Set(),
+    
+    init() {
+        this.kb = new KB();
+        this.knownSafe = new Set([0]);
+        this.knownPits = new Set();
+        this.knownWumpus = new Set();
+        
+        // Initial Knowledge: (0,0) is safe
+        this.kb.tell(new Clause([new Literal(`P${0}_${0}`, true)]));
+        this.kb.tell(new Clause([new Literal(`W${0}_${0}`, true)]));
+        
+        // General Rules (Breeze <=> Pit neighbors, Stench <=> Wumpus neighbors)
+        // We only add rules for cells we visit or neighbors we are curious about to stay efficient
+    },
+
+    tellPercept(idx, perceptions) {
+        const { r, c } = getCoords(idx);
+        const adj = ADJACENT(idx);
+        
+        // B_r_c <=> (P_n1 v P_n2 v ...)
+        // CNF 1: ~B_r_c v P_n1 v P_n2 ...
+        // CNF 2: ~P_n1 v B_r_c, ~P_n2 v B_r_c ...
+        
+        if (perceptions.breeze) {
+            this.kb.tell(new Clause([new Literal(`B${r}_${c}`)]));
+            this.kb.tell(new Clause([new Literal(`B${r}_${c}`, true), ...adj.map(n => {
+                const nC = getCoords(n);
+                return new Literal(`P${nC.r}_${nC.c}`);
+            })]));
+        } else {
+            this.kb.tell(new Clause([new Literal(`B${r}_${c}`, true)]));
+            adj.forEach(n => {
+                const nC = getCoords(n);
+                this.kb.tell(new Clause([new Literal(`P${nC.r}_${nC.c}`, true)]));
+            });
+        }
+
+        if (perceptions.stench) {
+            this.kb.tell(new Clause([new Literal(`S${r}_${c}`)]));
+            this.kb.tell(new Clause([new Literal(`S${r}_${c}`, true), ...adj.map(n => {
+                const nC = getCoords(n);
+                return new Literal(`W${nC.r}_${nC.c}`);
+            })]));
+        } else {
+            this.kb.tell(new Clause([new Literal(`S${r}_${c}`, true)]));
+            adj.forEach(n => {
+                const nC = getCoords(n);
+                this.kb.tell(new Clause([new Literal(`W${nC.r}_${nC.c}`, true)]));
+            });
+        }
+    },
+
+    inferSafety(idx) {
+        if (this.knownSafe.has(idx)) return true;
+        if (this.knownPits.has(idx) || this.knownWumpus.has(idx)) return false;
+
+        const { r, c } = getCoords(idx);
+        
+        // Ask Resolution: Is it (~P_r_c ^ ~W_r_c)?
+        const isSafePit = this.kb.ask(new Literal(`P${r}_${c}`, true));
+        const isSafeWumpus = this.kb.ask(new Literal(`W${r}_${c}`, true));
+        
+        if (isSafePit && isSafeWumpus) {
+            this.knownSafe.add(idx);
+            return true;
+        }
+        
+        // Also check if we can prove it's a pit or wumpus
+        if (this.kb.ask(new Literal(`P${r}_${c}`))) this.knownPits.add(idx);
+        if (this.kb.ask(new Literal(`W${r}_${c}`))) this.knownWumpus.add(idx);
+        
+        return false;
+    },
+
+    chooseAction() {
+        const current = gameState.playerPos;
+
+        if (gameState.hasGold && current === 0) return { type: 'climb' };
+        if (gameState.perceptions[current]?.glitter && !gameState.hasGold) return { type: 'pickup' };
+
+        if (gameState.hasGold) {
+            const path = this.getPath(current, 0, this.knownSafe);
+            if (path && path.length > 1) return { type: 'move', target: path[1] };
+        }
+
+        // 1. Visit known safe unvisited rooms
+        for (const idx of this.knownSafe) {
+            if (!gameState.visited.has(idx)) {
+                const path = this.getPath(current, idx, this.knownSafe);
+                if (path && path.length > 1) return { type: 'move', target: path[1] };
+            }
+        }
+
+        // 2. Infer safety for all neighbors of visited rooms
+        const boundary = new Set();
+        gameState.visited.forEach(v => {
+            ADJACENT(v).forEach(n => {
+                if (!gameState.visited.has(n)) boundary.add(n);
+            });
+        });
+
+        for (const b of boundary) {
+            if (this.inferSafety(b)) {
+                const path = this.getPath(current, b, this.knownSafe);
+                if (path && path.length > 1) return { type: 'move', target: path[1] };
+            }
+        }
+
+        // 3. Risky Move (last resort)
+        const adj = ADJACENT(current);
+        const unvisited = adj.filter(n => !gameState.visited.has(n));
+        const targets = unvisited.length > 0 ? unvisited : adj;
+        return { type: 'move', target: targets[Math.floor(Math.random() * targets.length)] };
+    },
+
+    getPath(start, end, allowed) {
+        const queue = [[start]];
+        const visited = new Set([start]);
+        while (queue.length > 0) {
+            const path = queue.shift();
+            const node = path[path.length - 1];
+            if (node === end) return path;
+            for (const neighbor of ADJACENT(node)) {
+                if (!visited.has(neighbor) && (allowed.has(neighbor) || gameState.visited.has(neighbor))) {
+                    visited.add(neighbor);
+                    queue.push([...path, neighbor]);
+                }
+            }
+        }
+        return null;
+    }
+};
+
+// --- Game Module ---
+
+const gameState = {
+    playerPos: 0,
+    wumpusPos: -1,
+    pits: [],
+    goldPos: -1,
+    arrows: 1,
+    hasGold: false,
+    wumpusAlive: true,
+    visited: new Set([0]),
+    trail: [0],
+    perceptions: {},
+    gameOver: false,
+    score: 0,
+    aiMode: false,
+    aiRunning: false,
+    aiAlgo: 'resolution'
+};
+
+const game = {
+    init() {
+        const rowsVal = parseInt(document.getElementById('rows-input').value);
+        const colsVal = parseInt(document.getElementById('cols-input').value);
+        ROWS = rowsVal;
+        COLS = colsVal;
+
+        gameState.playerPos = 0;
+        gameState.arrows = 1;
+        gameState.hasGold = false;
+        gameState.wumpusAlive = true;
+        gameState.visited = new Set([0]);
+        gameState.trail = [0];
+        gameState.gameOver = false;
+        gameState.score = 0;
+        
+        this.setupBoard();
+        AIAgent.init();
+        AIAgent.tellPercept(0, gameState.perceptions[0]);
+        this.render();
+        this.updateStats();
+        this.addLog("Episode Started. Map Rebuilt.", "important");
+    },
+
+    reinit() {
+        this.init();
+    },
+
+    setupBoard() {
+        const total = ROWS * COLS;
+        const available = Array.from({ length: total - 1 }, (_, i) => i + 1);
+        const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
+        shuffle(available);
+
+        gameState.wumpusPos = available.pop();
+        // Dynamic Pit count based on size
+        const pitCount = Math.floor(total * 0.15) || 1;
+        gameState.pits = [];
+        for(let i=0; i<pitCount; i++) gameState.pits.push(available.pop());
+        gameState.goldPos = available.pop();
+
+        this.updatePerceptions();
+    },
+
+    updatePerceptions() {
+        gameState.perceptions = {};
+        for (let i = 0; i < ROWS * COLS; i++) {
+            const adj = ADJACENT(i);
+            const p = { stench: false, breeze: false, glitter: i === gameState.goldPos };
+            if (adj.includes(gameState.wumpusPos) && gameState.wumpusAlive) p.stench = true;
+            if (adj.some(n => gameState.pits.includes(n))) p.breeze = true;
+            gameState.perceptions[i] = p;
+        }
+    },
+
+    handleAction(type, arg) {
+        if (gameState.gameOver) return;
+        
+        if (type === 'move') {
+            const target = this.getTargetFromDir(gameState.playerPos, arg);
+            if (target === -1) return;
+            gameState.playerPos = target;
+            gameState.visited.add(target);
+            gameState.trail.push(target);
+            gameState.score -= 1;
+            this.checkRoom();
+        } else if (type === 'pickup') {
+            if (gameState.playerPos === gameState.goldPos) {
+                gameState.hasGold = true;
+                gameState.goldPos = -1;
+                gameState.score += 100;
+                this.addLog("Got Gold!", "success");
+            }
+        } else if (type === 'climb') {
+            if (gameState.playerPos === 0 && gameState.hasGold) {
+                this.endGame(true, "Escaped with Gold!");
+            }
+        } else if (type === 'shoot') {
+             if (gameState.arrows <= 0) return;
+             gameState.arrows--;
+             gameState.score -= 10;
+             const hit = this.processShot(gameState.playerPos, arg);
+             if (hit) {
+                 gameState.wumpusAlive = false;
+                 this.addLog("Wumpus Slain!", "success");
+                 this.updatePerceptions();
+             }
+        }
+
+        AIAgent.tellPercept(gameState.playerPos, gameState.perceptions[gameState.playerPos]);
+        this.updateStats();
+        this.updateDashboard();
+        this.render();
+    },
+
+    getTargetFromDir(pos, dir) {
+        const { r, c } = getCoords(pos);
+        if (dir === 'N' && r > 0) return getIndex(r - 1, c);
+        if (dir === 'S' && r < ROWS - 1) return getIndex(r + 1, c);
+        if (dir === 'W' && c > 0) return getIndex(r, c - 1);
+        if (dir === 'E' && c < COLS - 1) return getIndex(r, c + 1);
+        return -1;
+    },
+
+    processShot(pos, dir) {
+        let current = pos;
+        while(true) {
+            current = this.getTargetFromDir(current, dir);
+            if (current === -1) break;
+            if (current === gameState.wumpusPos) return true;
+        }
+        return false;
+    },
+
+    checkRoom() {
+        const pos = gameState.playerPos;
+        if (pos === gameState.wumpusPos && gameState.wumpusAlive) this.endGame(false, "Eaten by Wumpus!");
+        else if (gameState.pits.includes(pos)) this.endGame(false, "Fell into Pit!");
+    },
+
+    endGame(win, msg) {
+        gameState.gameOver = true;
+        gameState.aiRunning = false;
+        document.getElementById('modal').style.display = 'flex';
+        document.getElementById('modal-title').innerText = win ? "Victory!" : "Defeat";
+        document.getElementById('modal-msg').innerText = msg;
+        this.render();
+    },
+
+    // AI Logic
+    toggleAiRunning() {
+        gameState.aiRunning = !gameState.aiRunning;
+        const btn = document.getElementById('start-ai-btn');
+        btn.innerText = gameState.aiRunning ? "STOP INFERENCE" : "START INFERENCE";
+        btn.style.background = gameState.aiRunning ? "var(--wumpus)" : "var(--safe)";
+        document.getElementById('game-status').innerText = gameState.aiRunning ? "INFERENCE RUNNING" : "INFERENCE IDLE";
+        if (gameState.aiRunning) this.aiLoop();
+    },
+
+    async aiLoop() {
+        while (gameState.aiRunning && !gameState.gameOver) {
+            const action = AIAgent.chooseAction();
+            if (action.type === 'move') {
+                const dir = this.getDir(gameState.playerPos, action.target);
+                this.handleAction('move', dir);
+            } else if (action.type === 'pickup') {
+                this.handleAction('pickup');
+            } else if (action.type === 'climb') {
+                this.handleAction('climb');
+            }
+            this.explain(action);
+            await new Promise(r => setTimeout(r, 600));
+        }
+    },
+
+    getDir(from, to) {
+        const f = getCoords(from);
+        const t = getCoords(to);
+        if (t.r < f.r) return 'N';
+        if (t.r > f.r) return 'S';
+        if (t.c < f.c) return 'W';
+        if (t.c > f.c) return 'E';
+        return 'N';
+    },
+
+    changeMode(mode) {
+        gameState.aiMode = (mode === 'auto');
+        gameState.aiRunning = false;
+        document.getElementById('algo-select-container').style.display = gameState.aiMode ? 'block' : 'none';
+    },
+
+    changeAlgo(algo) {
+        gameState.aiAlgo = algo;
+    },
+
+    explain(action) {
+        const exp = document.getElementById('explanation');
+        let html = `<br><strong>Decided Action:</strong> ${action.type.toUpperCase()}${action.target !== undefined ? ' to '+(action.target) : ''}<br>`;
+        exp.innerHTML = html;
+        this.updateDashboard();
+    },
+
+    updateDashboard() {
+        const p = gameState.perceptions[gameState.playerPos];
+        const exp = document.getElementById('explanation');
+        
+        // Update Metrics
+        document.getElementById('metric-steps').innerText = AIAgent.kb.inferenceSteps;
+        document.getElementById('metric-percepts').innerText = (p.breeze ? "Breeze " : "") + (p.stench ? "Stench " : "") + (p.glitter ? "Glitter" : "") || "None";
+
+        // Update Explanation Panel with current percepts always
+        let perceptHtml = `<strong>Current Percepts:</strong><br>`;
+        if (p.breeze) perceptHtml += `<span class="reasoning-fact">🌬️ Breeze</span>`;
+        if (p.stench) perceptHtml += `<span class="reasoning-fact">🤢 Stench</span>`;
+        if (p.glitter) perceptHtml += `<span class="reasoning-fact">✨ Glitter</span>`;
+        if (!p.breeze && !p.stench && !p.glitter) perceptHtml += `None<br>`;
+        
+        // Prepend percepts to whatever is in the explanation panel
+        const currentExp = exp.innerHTML.split('<strong>Decided Action:</strong>');
+        const decidedActionHtml = currentExp.length > 1 ? `<br><strong>Decided Action:</strong>` + currentExp[1] : '';
+        exp.innerHTML = perceptHtml + decidedActionHtml;
+    },
+
+    addLog(msg, type = "") {
+        const log = document.getElementById('log');
+        const entry = document.createElement('div');
+        entry.className = `log-entry ${type}`;
+        entry.innerText = `> ${msg}`;
+        log.prepend(entry);
+    },
+
+    updateStats() {
+        const { r, c } = getCoords(gameState.playerPos);
+        document.getElementById('stat-room').innerText = `${r},${c}`;
+        document.getElementById('stat-arrows').innerText = gameState.arrows;
+        document.getElementById('stat-gold').innerText = gameState.hasGold ? "Yes" : "No";
+        document.getElementById('stat-score').innerText = gameState.score;
+    },
+
+    render() {
+        const grid = document.getElementById('grid');
+        grid.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
+        grid.style.gridTemplateRows = `repeat(${ROWS}, 1fr)`;
+        grid.innerHTML = "";
+
+        for (let i = 0; i < ROWS * COLS; i++) {
+            const room = document.createElement('div');
+            room.className = 'room';
+            if (gameState.playerPos === i) room.classList.add('current');
+            
+            if (!gameState.visited.has(i)) {
+                room.classList.add('fog');
+                if (AIAgent.knownPits.has(i) || AIAgent.knownWumpus.has(i)) room.classList.add('confirmed-danger');
+                else if (AIAgent.knownSafe.has(i)) room.classList.add('confirmed-safe');
+                else room.classList.add('unknown');
+            } else {
+                room.classList.add('visited');
+            }
+            
+            if (gameState.trail.includes(i)) {
+                const dot = document.createElement('div');
+                dot.className = 'trail-dot';
+                room.appendChild(dot);
+            }
+
+            // Room Label
+            const num = document.createElement('div');
+            num.className = 'room-num';
+            const { r, c } = getCoords(i);
+            num.innerText = `${r},${c}`;
+            room.appendChild(num);
+
+            if (gameState.visited.has(i) || gameState.gameOver) {
+                const icon = document.createElement('div');
+                icon.className = 'entity-icon';
+                if (gameState.playerPos === i) icon.innerText = "👤";
+                else if (i === gameState.wumpusPos && gameState.wumpusAlive) icon.innerText = "👹";
+                else if (gameState.pits.includes(i)) icon.innerText = "🕳️";
+                else if (i === gameState.goldPos) icon.innerText = "💰";
+                room.appendChild(icon);
+
+                // Perceptions
+                const p = gameState.perceptions[i];
+                if (p && (p.stench || p.breeze || p.glitter)) {
+                    const container = document.createElement('div');
+                    container.className = 'perceptions';
+                    if (p.stench) container.innerHTML += '<div class="perception-icon" title="Stench">🤢</div>';
+                    if (p.breeze) container.innerHTML += '<div class="perception-icon" title="Breeze">🌬️</div>';
+                    if (p.glitter) container.innerHTML += '<div class="perception-icon" title="Glitter">✨</div>';
+                    room.appendChild(container);
+                }
+            }
+            grid.appendChild(room);
+        }
+    }
+};
+
+window.onload = () => game.init();
+
+</script>
+</body>
+</html>
